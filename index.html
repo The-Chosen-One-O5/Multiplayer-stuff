@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Hunter vs Runners 3D</title>
+    <style>
+        :root {
+            --primary: #ff4757;
+            --secondary: #2ed573;
+            --dark: #2f3542;
+            --light: #f1f2f6;
+            --ui-bg: rgba(0, 0, 0, 0.85);
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--dark);
+            color: var(--light);
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* UI Overlays */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--ui-bg);
+            transition: opacity 0.3s;
+        }
+
+        .hidden {
+            display: none !important;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        h1 { font-size: 3rem; text-transform: uppercase; letter-spacing: 5px; margin-bottom: 10px; text-shadow: 0 0 10px var(--primary); text-align: center;}
+        h2 { color: var(--secondary); margin-bottom: 20px; }
+        p { max-width: 600px; text-align: center; line-height: 1.5; color: #ccc; }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            margin: 10px;
+            border-radius: 5px;
+            transition: transform 0.1s, background 0.2s;
+            font-weight: bold;
+            box-shadow: 0 4px 0 #b33939;
+        }
+
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+
+        .btn-secondary { background: var(--secondary); box-shadow: 0 4px 0 #26af61; }
+        .btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; opacity: 0.7; }
+
+        /* Lobby & Character Select */
+        .char-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .char-card {
+            width: 60px;
+            height: 60px;
+            border: 2px solid #555;
+            border-radius: 8px;
+            cursor: pointer;
+            position: relative;
+            background: #444;
+            transition: 0.2s;
+        }
+        
+        .char-card:hover { transform: scale(1.1); }
+        .char-card.selected { border-color: var(--secondary); box-shadow: 0 0 10px var(--secondary); }
+        
+        .char-avatar { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+
+        input[type="text"] {
+            padding: 10px;
+            font-size: 1.2rem;
+            border-radius: 5px;
+            border: none;
+            margin: 10px;
+            text-align: center;
+            width: 200px;
+        }
+
+        /* HUD */
+        #hud {
+            z-index: 5;
+            pointer-events: none;
+        }
+        
+        .hud-top {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .stat-box {
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid var(--secondary);
+        }
+
+        .bar-container {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: var(--secondary);
+            width: 100%;
+            transition: width 0.2s;
+        }
+
+        .role-indicator {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 0 2px 4px black;
+        }
+
+        .role-hunter { color: var(--primary); }
+        .role-runner { color: var(--secondary); }
+
+        /* Weapon Wheel / Info */
+        .weapon-info {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            text-align: right;
+        }
+        
+        .weapon-icon {
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+
+        /* Mobile Controls */
+        .mobile-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 150px;
+            height: 150px;
+            z-index: 6;
+            display: none; /* Shown via JS on touch devices */
+            pointer-events: auto;
+        }
+
+        .joystick-base {
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            position: relative;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        .joystick-stick {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .fire-btn {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 71, 87, 0.6);
+            border-radius: 50%;
+            border: 2px solid white;
+            z-index: 6;
+            display: none;
+            pointer-events: auto;
+        }
+        
+        .fire-btn:active { background: rgba(255, 71, 87, 0.9); }
+
+        /* Notifications */
+        #notification-area {
+            position: absolute;
+            top: 20%;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 7;
+        }
+
+        .toast {
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-top: 10px;
+            animation: fadeUp 2s forwards;
+        }
+
+        @keyframes fadeUp {
+            0% { opacity: 0; transform: translateY(20px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-20px); }
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2rem; }
+            .char-grid { grid-template-columns: repeat(3, 1fr); }
+            .bar-container { width: 120px; }
+        }
+    </style>
+    
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- 3D Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- UI: Home Screen -->
+    <div id="screen-home" class="screen">
+        <h1>Hunter vs Runners</h1>
+        <p>Hide behind walls, collect weapons, and survive. <br>Hunters must eliminate all runners.</p>
+        <div style="margin-top: 30px;">
+            <button class="btn" onclick="GameApp.hostGame()">HOST GAME</button>
+            <button class="btn btn-secondary" onclick="GameApp.showJoinScreen()">JOIN GAME</button>
+        </div>
+    </div>
+
+    <!-- UI: Join Screen -->
+    <div id="screen-join" class="screen hidden">
+        <h2>Join Room</h2>
+        <input type="text" id="room-code-input" placeholder="Enter Room Code" maxlength="6">
+        <br>
+        <button class="btn btn-secondary" onclick="GameApp.joinGame()">JOIN</button>
+        <button class="btn" onclick="GameApp.showHome()">BACK</button>
+    </div>
+
+    <!-- UI: Lobby (Host Only) -->
+    <div id="screen-lobby" class="screen hidden">
+        <h1>Lobby</h1>
+        <p>Room Code: <span id="display-room-code" style="color:var(--secondary); font-size:1.5rem; font-weight:bold;"></span></p>
+        <p>Players Waiting: <span id="player-count">1</span>/2 (Min required)</p>
+        
+        <h3>Select Character</h3>
+        <div class="char-grid" id="char-select-grid">
+            <!-- Generated by JS -->
+        </div>
+
+        <button id="btn-start" class="btn hidden" onclick="GameApp.startGame()">START GAME</button>
+    </div>
+
+    <!-- UI: Loading / Role Assignment -->
+    <div id="screen-loading" class="screen hidden">
+        <h1 id="loading-text">Assigning Roles...</h1>
+        <div class="bar-container" style="width: 300px; margin: 20px auto;">
+            <div class="bar-fill" id="loading-bar"></div>
+        </div>
+    </div>
+
+    <!-- UI: HUD (In Game) -->
+    <div id="hud" class="hidden">
+        <div class="hud-top">
+            <div class="stat-box">
+                <div>Health</div>
+                <div class="bar-container">
+                    <div id="hud-hp-bar" class="bar-fill" style="background: #ff4757;"></div>
+                </div>
+                <div id="hud-hp-text">100/100</div>
+            </div>
+            <div class="stat-box" style="text-align: right;">
+                <div>Weapon</div>
+                <div id="hud-weapon-name" style="font-size: 1.2rem; font-weight: bold;">None</div>
+                <div id="hud-ammo" style="font-size: 0.9rem; color: #ccc;">-</div>
+            </div>
+        </div>
+        
+        <div id="hud-role" class="role-indicator role-runner">RUNNER</div>
+        <div id="notification-area"></div>
+
+        <!-- Weapon Cooldown Overlay (visual) -->
+        <div id="cooldown-overlay" style="position: absolute; bottom: 100px; right: 40px; width: 50px; height: 50px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.5); display:none;"></div>
+
+        <!-- Mobile Controls -->
+        <div id="mobile-joystick" class="mobile-controls">
+            <div class="joystick-base">
+                <div class="joystick-stick" id="stick"></div>
+            </div>
+        </div>
+        <div id="mobile-fire" class="fire-btn"></div>
+    </div>
+
+    <!-- UI: Game Over -->
+    <div id="screen-gameover" class="screen hidden">
+        <h1 id="winner-text">GAME OVER</h1>
+        <p id="win-reason">You died!</p>
+        <button class="btn" onclick="location.reload()">MAIN MENU</button>
+    </div>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- MOCK PARTYKIT ---
+    // Simulating a real-time server using BroadcastChannel
+    class MockPartyKit {
+        constructor() {
+            this.room = null;
+            this.id = Math.random().toString(36).substr(2, 9);
+            this.listeners = {};
+            this.channel = null;
+        }
+
+        connect(roomName) {
+            return new Promise((resolve) => {
+                this.room = roomName;
+                this.channel = new BroadcastChannel(`partykit_${roomName}`);
+                this.channel.onmessage = (e) => this.emit(e.data.type, e.data.payload);
+                
+                // Announce join
+                this.broadcast('player-join', { id: this.id });
+                console.log(`[Network] Connected to ${roomName}`);
+                resolve();
+            });
+        }
+
+        broadcast(type, payload) {
+            const msg = { type, payload, sender: this.id };
+            // Send to others
+            if(this.channel) this.channel.postMessage(msg);
+            // Handle locally
+            this.emit(type, payload);
+        }
+
+        on(type, callback) {
+            if (!this.listeners[type]) this.listeners[type] = [];
+            this.listeners[type].push(callback);
+        }
+
+        emit(type, payload) {
+            if (this.listeners[type]) {
+                this.listeners[type].forEach(cb => cb(payload));
+            }
+        }
+    }
+
+    // --- CONSTANTS ---
+    const WORLD_SIZE = 200;
+    const WALL_HEIGHT = 15;
+    const COLORS = [0xff4757, 0x2ed573, 0x1e90ff, 0xffa502, 0x9c88ff, 0xeccc68, 0xff6b81, 0x7bed9f, 0x70a1ff, 0xeccc68, 0x5352ed, 0x2f3542];
+    const WEAPONS = {
+        none: { name: "Fists", damage: 2, range: 3, cooldown: 1000, type: 'melee' },
+        dagger: { name: "Dagger", damage: 5, range: 4, cooldown: 800, type: 'melee', color: 0xaaaaaa },
+        sword: { name: "Sword", damage: 20, range: 5, cooldown: 1200, type: 'melee', color: 0xffffff },
+        pistol: { name: "Pistol", damage: 10, range: 100, cooldown: 2000, speed: 60, type: 'range', color: 0xcd6133 },
+        greaterGun: { name: "Machine Gun", damage: 10, range: 100, cooldown: 150, speed: 80, type: 'range', color: 0x474787 }
+    };
+
+    // --- GAME STATE & LOGIC ---
+    const GameApp = {
+        network: new MockPartyKit(),
+        state: 'home', // home, lobby, loading, game, gameover
+        role: 'runner', // hunter, runner
+        isHost: false,
+        roomId: '',
+        players: {}, // id -> { mesh, data: { hp, weapon, role, charColor... } }
+        myId: null,
+        scene: null,
+        camera: null,
+        renderer: null,
+        lastTime: 0,
+        inputs: { x: 0, y: 0, fire: false },
+        items: [], // { mesh, type, active }
+        projectiles: [], // { mesh, owner, velocity, life }
+        minion: null, // AI entity
+        obstacles: [], // Array of THREE.Box3 for collision
+
+        // Init
+        init: function() {
+            this.setupThree();
+            this.setupInputs();
+            this.generateCharGrid();
+            this.loop = this.loop.bind(this);
+            requestAnimationFrame(this.loop);
+            
+            // Handle network events
+            this.network.on('player-join', this.handlePlayerJoin.bind(this));
+            this.network.on('game-start', this.handleGameStart.bind(this));
+            this.network.on('update-state', this.handleStateUpdate.bind(this));
+            this.network.on('player-action', this.handlePlayerAction.bind(this));
+            this.network.on('hit', this.handleHit.bind(this));
+            this.network.on('minion-update', (data) => this.updateMinion(data));
+        },
+
+        // --- THREE.JS SETUP ---
+        setupThree: function() {
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x87CEEB);
+            this.scene.fog = new THREE.Fog(0x87CEEB, 20, WORLD_SIZE/2);
+
+            this.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            
+            this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.shadowMap.enabled = true;
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            this.scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -100;
+            dirLight.shadow.camera.right = 100;
+            dirLight.shadow.camera.top = 100;
+            dirLight.shadow.camera.bottom = -100;
+            this.scene.add(dirLight);
+
+            // Floor
+            const floorGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x44bd32 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            this.scene.add(floor);
+
+            // World Borders (Walls)
+            this.createWorldBorders();
+
+            // Obstacles
+            this.generateMap();
+
+            window.addEventListener('resize', () => {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        },
+
+        createWorldBorders: function() {
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x2f3542 });
+            const h = WALL_HEIGHT;
+            const w = WORLD_SIZE;
+            const t = 2; // thickness
+
+            const walls = [
+                { pos: [0, h/2, -w/2], dim: [w, h, t] },
+                { pos: [0, h/2, w/2], dim: [w, h, t] },
+                { pos: [-w/2, h/2, 0], dim: [t, h, w] },
+                { pos: [w/2, h/2, 0], dim: [t, h, w] }
+            ];
+
+            walls.forEach(w => {
+                const geo = new THREE.BoxGeometry(...w.dim);
+                const mesh = new THREE.Mesh(geo, wallMat);
+                mesh.position.set(...w.pos);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+                
+                // Add to collision system
+                const box = new THREE.Box3().setFromObject(mesh);
+                this.obstacles.push(box);
+            });
+        },
+
+        generateMap: function() {
+            // Trees
+            const treeGeo = new THREE.ConeGeometry(2, 8, 8);
+            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.5, 2);
+            const treeMat = new THREE.MeshStandardMaterial({ color: 0x006266 });
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x84817a });
+
+            for(let i=0; i<40; i++) {
+                const x = (Math.random() - 0.5) * (WORLD_SIZE - 20);
+                const z = (Math.random() - 0.5) * (WORLD_SIZE - 20);
+                
+                const group = new THREE.Group();
+                const leaves = new THREE.Mesh(treeGeo, treeMat);
+                leaves.position.y = 5;
+                leaves.castShadow = true;
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 1;
+                
+                group.add(leaves);
+                group.add(trunk);
+                group.position.set(x, 0, z);
+                this.scene.add(group);
+
+                // Add tree trunk to collision
+                const box = new THREE.Box3();
+                box.setFromCenterAndSize(new THREE.Vector3(x, 1, z), new THREE.Vector3(1, 2, 1));
+                this.obstacles.push(box);
+            }
+
+            // Structures (Closed Rooms/Walls)
+            const structMat = new THREE.MeshStandardMaterial({ color: 0x808e9b });
+            for(let i=0; i<15; i++) {
+                const w = 10 + Math.random() * 10;
+                const d = 10 + Math.random() * 10;
+                const h = 4 + Math.random() * 4;
+                const x = (Math.random() - 0.5) * (WORLD_SIZE - 40);
+                const z = (Math.random() - 0.5) * (WORLD_SIZE - 40);
+                
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mesh = new THREE.Mesh(geo, structMat);
+                mesh.position.set(x, h/2, z);
+                mesh.castShadow = true;
+                this.scene.add(mesh);
+                
+                // Add structure to collision
+                const box = new THREE.Box3().setFromObject(mesh);
+                this.obstacles.push(box);
+            }
+        },
+
+        // --- COLLISION SYSTEM ---
+        checkCollision: function(position, radius = 1) {
+            // 1. World Border
+            const limit = WORLD_SIZE/2 - radius;
+            if(position.x < -limit || position.x > limit || position.z < -limit || position.z > limit) {
+                return true;
+            }
+
+            // 2. Obstacles (Trees, Buildings)
+            const playerBox = new THREE.Box3();
+            const size = new THREE.Vector3(radius, 4, radius); // Approximation of player size
+            playerBox.setFromCenterAndSize(position, size);
+
+            for (const obsBox of this.obstacles) {
+                if (playerBox.intersectsBox(obsBox)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+
+        // --- UI & FLOW ---
+        showHome: function() {
+            this.switchScreen('screen-home');
+        },
+        
+        showJoinScreen: function() {
+            this.switchScreen('screen-join');
+        },
+
+        switchScreen: function(id) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            document.getElementById(id).classList.remove('hidden');
+            if(id === 'screen-gameover') document.getElementById('hud').classList.add('hidden');
+        },
+
+        generateCharGrid: function() {
+            const grid = document.getElementById('char-select-grid');
+            grid.innerHTML = '';
+            for(let i=0; i<12; i++) {
+                const div = document.createElement('div');
+                div.className = 'char-card';
+                const color = '#' + COLORS[i].toString(16).padStart(6,'0');
+                div.innerHTML = `<div class="char-avatar" style="color:${color}">●</div>`;
+                div.onclick = () => {
+                    document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
+                    div.classList.add('selected');
+                    this.selectedCharIndex = i;
+                };
+                grid.appendChild(div);
+            }
+        },
+
+        hostGame: function() {
+            this.isHost = true;
+            this.selectedCharIndex = 0;
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            this.roomId = code;
+            document.getElementById('display-room-code').innerText = code;
+            
+            this.network.connect(code).then(() => {
+                this.switchScreen('screen-lobby');
+                this.players[this.network.id] = {
+                    id: this.network.id,
+                    charIndex: 0,
+                    role: 'runner',
+                    ready: true
+                };
+                this.updateLobbyUI();
+            });
+        },
+
+        joinGame: function() {
+            const code = document.getElementById('room-code-input').value.trim();
+            if(!code) return alert("Enter a code");
+            
+            this.isHost = false;
+            this.selectedCharIndex = 0;
+            this.roomId = code;
+
+            try {
+                this.network.connect(code).then(() => {
+                    document.getElementById('display-room-code').innerText = code;
+                    this.switchScreen('screen-lobby');
+                });
+            } catch(e) {
+                alert("Failed to join");
+            }
+        },
+
+        handlePlayerJoin: function(data) {
+            if(this.isHost) {
+                this.players[data.id] = { id: data.id, charIndex: 0, role: 'runner' };
+                this.updateLobbyUI();
+                this.network.broadcast('lobby-update', this.players);
+            }
+        },
+
+        updateLobbyUI: function() {
+            if(!this.isHost) return;
+            const count = Object.keys(this.players).length;
+            document.getElementById('player-count').innerText = count;
+            const startBtn = document.getElementById('btn-start');
+            if(count >= 2) {
+                startBtn.classList.remove('hidden');
+            } else {
+                startBtn.classList.add('hidden');
+            }
+        },
+
+        startGame: function() {
+            if(!this.isHost) return;
+            
+            const ids = Object.keys(this.players);
+            const hunterId = ids[Math.floor(Math.random() * ids.length)];
+            
+            const gameState = {};
+            ids.forEach(id => {
+                // Ensure spawn position doesn't collide
+                let pos = this.getSpawnPos();
+                while(this.checkCollision(new THREE.Vector3(pos.x, pos.y, pos.z), 2)) {
+                    pos = this.getSpawnPos();
+                }
+
+                gameState[id] = {
+                    role: (id === hunterId) ? 'hunter' : 'runner',
+                    hp: 100,
+                    weapon: 'none',
+                    pos: pos,
+                    rot: 0,
+                    charIndex: this.players[id].charIndex
+                };
+            });
+
+            // Create Minion
+            gameState.minion = {
+                pos: { x: 0, y: 0, z: 0 },
+                hp: 500,
+                targetId: null
+            };
+
+            // Spawn Items
+            const itemSpawns = [];
+            for(let i=0; i<20; i++) {
+                const types = Object.keys(WEAPONS).filter(k => k !== 'none');
+                types.push('health');
+                itemSpawns.push({
+                    type: types[Math.floor(Math.random() * types.length)],
+                    pos: this.getSpawnPos()
+                });
+            }
+            gameState.items = itemSpawns;
+
+            this.network.broadcast('game-start', gameState);
+        },
+
+        handleGameStart: function(data) {
+            this.switchScreen('screen-loading');
+            document.getElementById('loading-text').innerText = "Preparing World...";
+            document.getElementById('loading-bar').style.width = "100%";
+            
+            setTimeout(() => {
+                document.getElementById('screen-loading').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                this.initGameWorld(data);
+            }, 1000);
+        },
+
+        initGameWorld: function(serverState) {
+            this.state = 'game';
+            
+            const myData = serverState[this.network.id];
+            this.role = myData.role;
+            this.myId = this.network.id;
+
+            // Setup UI
+            const roleEl = document.getElementById('hud-role');
+            roleEl.innerText = this.role.toUpperCase();
+            roleEl.className = `role-indicator role-${this.role}`;
+            
+            if(this.role === 'hunter') this.showToast("You are the HUNTER! Kill everyone.");
+            else this.showToast("You are a RUNNER! Hide or Fight!");
+
+            // Create Player Meshes
+            for (const [id, p] of Object.entries(serverState)) {
+                if (id === 'minion' || id === 'items') continue;
+                this.createPlayerMesh(id, p);
+            }
+
+            // Create Items
+            serverState.items.forEach((item, idx) => {
+                this.createItemMesh(idx, item);
+            });
+
+            // Create Minion (Ensure it exists on all clients)
+            if(serverState.minion) {
+                this.createMinionMesh(serverState.minion);
+            }
+
+            if(this.isTouchDevice()) {
+                document.getElementById('mobile-joystick').style.display = 'block';
+                document.getElementById('mobile-fire').style.display = 'block';
+            }
+
+            this.lastTime = performance.now();
+        },
+
+        getSpawnPos: function() {
+            return {
+                x: (Math.random() - 0.5) * (WORLD_SIZE - 10),
+                y: 0,
+                z: (Math.random() - 0.5) * (WORLD_SIZE - 10)
+            };
+        },
+
+        createPlayerMesh: function(id, data) {
+            const color = COLORS[data.charIndex || 0];
+            const group = new THREE.Group();
+            
+            const geo = new THREE.CapsuleGeometry(1, 2, 4, 8);
+            const mat = new THREE.MeshStandardMaterial({ color: color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.y = 2;
+            mesh.castShadow = true;
+            group.add(mesh);
+
+            const eyeGeo = new THREE.BoxGeometry(0.5, 0.2, 0.5);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const eyes = new THREE.Mesh(eyeGeo, eyeMat);
+            eyes.position.set(0, 2.5, 0.8);
+            group.add(eyes);
+
+            const weaponGeo = new THREE.BoxGeometry(0.2, 0.2, 1);
+            const weaponMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const weapon = new THREE.Mesh(weaponGeo, weaponMat);
+            weapon.position.set(0.6, 2, 0.5);
+            weapon.name = "weapon";
+            group.add(weapon);
+
+            group.position.set(data.pos.x, data.pos.y, data.pos.z);
+            
+            this.scene.add(group);
+            this.players[id] = { mesh: group, data: data };
+        },
+
+        createItemMesh: function(idx, data) {
+            let geo, mat, color;
+            if(data.type === 'health') {
+                geo = new THREE.BoxGeometry(1, 1, 1);
+                color = 0xff4757;
+            } else {
+                geo = new THREE.SphereGeometry(0.5, 8, 8);
+                color = WEAPONS[data.type] ? WEAPONS[data.type].color : 0xffffff;
+            }
+            mat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(data.pos.x, 1, data.pos.z);
+            mesh.userData = { offset: Math.random() * Math.PI, type: data.type, idx: idx };
+            
+            this.scene.add(mesh);
+            this.items.push(mesh);
+        },
+
+        createMinionMesh: function(data) {
+            const group = new THREE.Group();
+            const geo = new THREE.CylinderGeometry(2, 2, 6, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.2 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.y = 3;
+            group.add(mesh);
+            
+            const eyeGeo = new THREE.SphereGeometry(0.5);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const eye1 = new THREE.Mesh(eyeGeo, eyeMat);
+            const eye2 = new THREE.Mesh(eyeGeo, eyeMat);
+            eye1.position.set(1, 4, 2);
+            eye2.position.set(-1, 4, 2);
+            group.add(eye1);
+            group.add(eye2);
+
+            group.position.set(data.pos.x, data.pos.y, data.pos.z);
+            this.scene.add(group);
+            
+            // Initialize minion state on client
+            this.minion = { mesh: group, hp: data.hp, targetId: null };
+        },
+
+        // --- INPUT HANDLING ---
+        setupInputs: function() {
+            document.addEventListener('keydown', (e) => {
+                if(e.code === 'KeyW') this.inputs.y = -1;
+                if(e.code === 'KeyS') this.inputs.y = 1;
+                if(e.code === 'KeyA') this.inputs.x = -1;
+                if(e.code === 'KeyD') this.inputs.x = 1;
+                if(e.code === 'Space') this.fireWeapon();
+            });
+            document.addEventListener('keyup', (e) => {
+                if(['KeyW','KeyS'].includes(e.code)) this.inputs.y = 0;
+                if(['KeyA','KeyD'].includes(e.code)) this.inputs.x = 0;
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === document.body && this.players[this.myId]) {
+                    const player = this.players[this.myId].mesh;
+                    player.rotation.y -= e.movementX * 0.002;
+                }
+            });
+
+            document.getElementById('game-canvas').addEventListener('mousedown', () => {
+                if(this.state !== 'game') return;
+                document.body.requestPointerLock();
+                this.fireWeapon();
+            });
+
+            // Touch Joystick logic (same as before)
+            this.isTouchDevice = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            const joystick = document.getElementById('mobile-joystick');
+            const stick = document.getElementById('stick');
+            let touchStartX = 0, touchStartY = 0;
+            
+            joystick.addEventListener('touchstart', (e) => {
+                const touch = e.touches[0];
+                const rect = joystick.getBoundingClientRect();
+                touchStartX = rect.left + rect.width/2;
+                touchStartY = rect.top + rect.height/2;
+            });
+
+            joystick.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const dx = touch.clientX - touchStartX;
+                const dy = touch.clientY - touchStartY;
+                const dist = Math.min(40, Math.sqrt(dx*dx + dy*dy));
+                const angle = Math.atan2(dy, dx);
+                
+                stick.style.transform = `translate(-50%, -50%) translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+                this.inputs.x = Math.cos(angle);
+                this.inputs.y = Math.sin(angle);
+            });
+
+            joystick.addEventListener('touchend', () => {
+                stick.style.transform = `translate(-50%, -50%)`;
+                this.inputs.x = 0;
+                this.inputs.y = 0;
+            });
+
+            document.getElementById('mobile-fire').addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.fireWeapon();
+            });
+        },
+
+        // --- GAME LOOP ---
+        loop: function(time) {
+            requestAnimationFrame(this.loop);
+            const delta = (time - this.lastTime) / 1000;
+            this.lastTime = time;
+
+            if(this.state !== 'game') return;
+
+            this.updatePlayerMovement(delta);
+            this.updateCamera();
+            this.updateProjectiles(delta);
+            this.updateAnimations(time);
+
+            if(this.isHost) {
+                this.processHostLogic(delta);
+            } else {
+                this.sendInputs();
+            }
+
+            this.renderer.render(this.scene, this.camera);
+        },
+
+        updatePlayerMovement: function(delta) {
+            const p = this.players[this.myId];
+            if(!p) return;
+
+            const speed = 12;
+            const moveVec = new THREE.Vector3(this.inputs.x, 0, this.inputs.y).normalize();
+            
+            // Calculate target position
+            moveVec.applyAxisAngle(new THREE.Vector3(0,1,0), p.mesh.rotation.y);
+            const nextPos = p.mesh.position.clone().add(moveVec.multiplyScalar(speed * delta));
+
+            // COLLISION CHECK
+            if(this.checkCollision(nextPos, 0.8)) {
+                return; // Stop movement if hitting a wall
+            }
+
+            p.mesh.position.copy(nextPos);
+        },
+
+        updateCamera: function() {
+            const p = this.players[this.myId];
+            if(!p) return;
+            const offset = new THREE.Vector3(0, 6, 10);
+            offset.applyAxisAngle(new THREE.Vector3(0,1,0), p.mesh.rotation.y);
+            const targetPos = p.mesh.position.clone().add(offset);
+            this.camera.position.lerp(targetPos, 0.1);
+            this.camera.lookAt(p.mesh.position.clone().add(new THREE.Vector3(0,2,0)));
+        },
+
+        updateAnimations: function(time) {
+            this.items.forEach(item => {
+                item.rotation.y += 0.01;
+                item.position.y = 1 + Math.sin(time * 0.003 + item.userData.offset) * 0.3;
+            });
+        },
+
+        fireWeapon: function() {
+            const now = performance.now();
+            const p = this.players[this.myId];
+            if(!p || now - (p.lastFire || 0) < (p.data.cooldown || 1000)) return;
+
+            p.lastFire = now;
+            const weaponKey = p.data.weapon;
+            const weapon = WEAPONS[weaponKey] || WEAPONS.none;
+
+            // Visual Recoil
+            const weaponMesh = p.mesh.getObjectByName("weapon");
+            if(weaponMesh) {
+                weaponMesh.rotation.x -= 1;
+                setTimeout(() => weaponMesh.rotation.x = 0, 100);
+            }
+
+            if(this.isHost) {
+                this.createProjectile(this.network.id, weapon);
+            } else {
+                this.network.broadcast('player-action', { type: 'shoot', weapon: weaponKey });
+            }
+        },
+
+        createProjectile: function(ownerId, weapon) {
+            const owner = this.players[ownerId];
+            if(!owner) return;
+
+            const geo = new THREE.SphereGeometry(0.3);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(owner.mesh.position);
+            mesh.position.y += 2; 
+
+            const dir = new THREE.Vector3(0, 0, 1);
+            dir.applyAxisAngle(new THREE.Vector3(0,1,0), owner.mesh.rotation.y);
+            const vel = dir.multiplyScalar(weapon.speed || 50);
+
+            this.scene.add(mesh);
+            this.projectiles.push({ mesh, owner: ownerId, vel, damage: weapon.damage, life: 2 });
+        },
+
+        updateProjectiles: function(delta) {
+            for(let i = this.projectiles.length - 1; i >= 0; i--) {
+                const proj = this.projectiles[i];
+                const nextPos = proj.mesh.position.clone().add(proj.vel.clone().multiplyScalar(delta));
+                
+                // Check Wall Collision
+                if(this.checkCollision(nextPos, 0.3)) {
+                    this.scene.remove(proj.mesh);
+                    this.projectiles.splice(i, 1);
+                    continue;
+                }
+
+                proj.mesh.position.copy(nextPos);
+                proj.life -= delta;
+
+                // Player Collision
+                for (const [id, p] of Object.entries(this.players)) {
+                    if(id === proj.owner) continue;
+                    if(p.data.hp <= 0) continue;
+                    const dist = proj.mesh.position.distanceTo(p.mesh.position);
+                    if(dist < 2) {
+                        this.handleDamage(id, proj.damage, proj.owner);
+                        this.scene.remove(proj.mesh);
+                        this.projectiles.splice(i, 1);
+                        return;
+                    }
+                }
+
+                // Minion Collision
+                if(this.minion && this.minion.hp > 0) {
+                    const dist = proj.mesh.position.distanceTo(this.minion.mesh.position);
+                    if(dist < 3) {
+                        this.minion.hp -= proj.damage;
+                        this.scene.remove(proj.mesh);
+                        this.projectiles.splice(i, 1);
+                        this.showToast(`Minion HP: ${this.minion.hp}`);
+                        if(this.minion.hp <= 0) {
+                            this.scene.remove(this.minion.mesh);
+                            this.minion = null;
+                            this.checkWinCondition();
+                        }
+                        return;
+                    }
+                }
+
+                if(proj.life <= 0) {
+                    this.scene.remove(proj.mesh);
+                    this.projectiles.splice(i, 1);
+                }
+            }
+        },
+
+        handleDamage: function(targetId, amount, sourceId) {
+            const p = this.players[targetId];
+            if(!p || p.data.hp <= 0) return;
+            
+            p.data.hp -= amount;
+            if(p.data.hp < 0) p.data.hp = 0;
+
+            // Visual Flash
+            const originalColor = p.mesh.children[0].material.color.getHex();
+            p.mesh.children[0].material.color.setHex(0xffffff);
+            setTimeout(() => {
+                if(this.players[targetId]) p.mesh.children[0].material.color.setHex(originalColor);
+            }, 100);
+
+            if(this.isHost) {
+                this.network.broadcast('hit', { targetId, hp: p.data.hp });
+                
+                // Heal Hunter on Kill
+                if(p.data.hp === 0 && sourceId) {
+                    const hunter = this.players[sourceId];
+                    if(hunter && hunter.data.role === 'hunter') {
+                        hunter.data.hp = Math.min(150, hunter.data.hp + 20);
+                    }
+                    this.checkWinCondition();
+                }
+            }
+        },
+
+        handleHit: function(data) {
+            const p = this.players[data.targetId];
+            if(p) {
+                p.data.hp = data.hp;
+                if(p.data.hp <= 0 && data.targetId === this.myId) {
+                    this.die("You were killed!");
+                }
+                this.updateHUD();
+            }
+        },
+
+        handlePlayerAction: function(data) {
+            if(this.isHost && data.type === 'shoot') {
+                const weapon = WEAPONS[data.weapon];
+                this.createProjectile(data.sender, weapon);
+            } else if (data.type === 'move') {
+                // Host stores positions of clients to sync or validate
+                if(this.players[data.sender]) {
+                    const p = this.players[data.sender];
+                    p.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
+                    p.mesh.rotation.y = data.rot;
+                    // Broadcast back to everyone else
+                    this.network.broadcast('update-state', { id: data.sender, pos: data.pos, rot: data.rot });
+                }
+            }
+        },
+
+        handleStateUpdate: function(data) {
+            if(data.id !== this.network.id && this.players[data.id]) {
+                const p = this.players[data.id];
+                p.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
+                p.mesh.rotation.y = data.rot;
+            }
+        },
+
+        sendInputs: function() {
+            const p = this.players[this.myId];
+            if(p) {
+                this.network.broadcast('player-action', {
+                    type: 'move',
+                    pos: p.mesh.position,
+                    rot: p.mesh.rotation.y
+                });
+            }
+        },
+
+        // --- HOST LOGIC (MINION AI) ---
+        processHostLogic: function(delta) {
+            // 1. Minion AI
+            if(this.minion && this.minion.hp > 0) {
+                const mMesh = this.minion.mesh;
+                let nearestRunner = null;
+                let minDist = 9999;
+                
+                // Find nearest Runner
+                Object.values(this.players).forEach(p => {
+                    if(p.data.role === 'runner' && p.data.hp > 0) {
+                        const d = mMesh.position.distanceTo(p.mesh.position);
+                        if(d < minDist) {
+                            minDist = d;
+                            nearestRunner = p;
+                        }
+                    }
+                });
+
+                if(nearestRunner) {
+                    const dir = new THREE.Vector3().subVectors(nearestRunner.mesh.position, mMesh.position).normalize();
+                    const nextPos = mMesh.position.clone().add(dir.multiplyScalar(5 * delta)); // Minion Speed
+                    
+                    // Simple Collision Avoidance for Minion (Stop at wall)
+                    if(!this.checkCollision(nextPos, 2)) {
+                        mMesh.position.copy(nextPos);
+                        mMesh.lookAt(nearestRunner.mesh.position);
+                    }
+
+                    // Attack
+                    if(minDist < 3.5) {
+                        this.handleDamage(nearestRunner.data.id, 1, 'minion'); // 1 DPS contact
+                    }
+                }
+                
+                this.network.broadcast('minion-update', { pos: mMesh.position });
+            }
+
+            // 2. Item Pickups (Host Authoritative)
+            this.items.forEach((itemMesh, idx) => {
+                for (const [id, p] of Object.entries(this.players)) {
+                    if(p.data.hp > 0 && p.mesh.position.distanceTo(itemMesh.position) < 2) {
+                        const type = itemMesh.userData.type;
+                        if(type === 'health') {
+                            p.data.hp = Math.min(100, p.data.hp + 10);
+                            if(id === this.network.id) this.showToast("+10 Health");
+                        } else {
+                            p.data.weapon = type;
+                            p.data.cooldown = WEAPONS[type].cooldown;
+                            const wMesh = p.mesh.getObjectByName("weapon");
+                            if(wMesh) wMesh.material.color.setHex(WEAPONS[type].color);
+                            if(id === this.network.id) this.showToast(`Equipped ${WEAPONS[type].name}`);
+                        }
+                        
+                        const newPos = this.getSpawnPos();
+                        itemMesh.position.set(newPos.x, 1, newPos.z);
+                        this.network.broadcast('item-pickup', { playerId: id, type });
+                    }
+                }
+            });
+        },
+
+        updateMinion: function(data) {
+            if(this.minion && this.minion.mesh) {
+                this.minion.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
+            }
+        },
+
+        // --- UTILS ---
+        updateHUD: function() {
+            const p = this.players[this.myId];
+            if(!p) return;
+            document.getElementById('hud-hp-bar').style.width = p.data.hp + '%';
+            document.getElementById('hud-hp-text').innerText = Math.ceil(p.data.hp) + '/100';
+            document.getElementById('hud-weapon-name').innerText = WEAPONS[p.data.weapon].name;
+            const weapon = WEAPONS[p.data.weapon];
+            document.getElementById('hud-ammo').innerText = weapon.type === 'range' ? '∞' : 'Melee';
+        },
+
+        showToast: function(msg) {
+            const area = document.getElementById('notification-area');
+            const el = document.createElement('div');
+            el.className = 'toast';
+            el.innerText = msg;
+            area.appendChild(el);
+            setTimeout(() => el.remove(), 2000);
+        },
+
+        checkWinCondition: function() {
+            const aliveRunners = Object.values(this.players).filter(p => p.data.role === 'runner' && p.data.hp > 0).length;
+            const aliveHunter = Object.values(this.players).find(p => p.data.role === 'hunter' && p.data.hp > 0);
+            const minionAlive = this.minion !== null;
+
+            if(aliveRunners === 0) {
+                this.endGame("Hunter Wins!", "All runners eliminated.");
+            } else if (!aliveHunter && !minionAlive) {
+                this.endGame("Runners Win!", "Hunter and Minion defeated.");
+            }
+        },
+
+        die: function(reason) {
+            this.endGame("YOU DIED", reason);
+        },
+
+        endGame: function(title, reason) {
+            this.state = 'gameover';
+            document.getElementById('winner-text').innerText = title;
+            document.getElementById('win-reason').innerText = reason;
+            this.switchScreen('screen-gameover');
+            document.exitPointerLock();
+        }
+    };
+
+    // Expose to window
+    window.GameApp = GameApp;
+    GameApp.init();
+
+</script>
+</body>
+</html>
