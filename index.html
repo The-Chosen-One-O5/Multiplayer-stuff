@@ -801,7 +801,7 @@
         updateLobbyFromPlayers: function(players) {
             // Build players object from server data
             this.players = {};
-            Object.values(players).forEach((p: any) => {
+            Object.values(players).forEach((p) => {
                 this.players[p.id] = {
                     id: p.id,
                     charIndex: p.charIndex,
