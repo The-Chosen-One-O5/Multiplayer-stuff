@@ -1,0 +1,12 @@
+{
+  "name": "hunter-vs-runners-partykit",
+  "version": "1.0.0",
+  "description": "PartyKit server for Hunter vs Runners 3D game",
+  "scripts": {
+    "dev": "partykit dev",
+    "deploy": "partykit deploy"
+  },
+  "dependencies": {
+    "partykit": "latest"
+  }
+}
