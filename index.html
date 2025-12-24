@@ -261,15 +261,8 @@
         }
     </style>
     
-    <!-- Import Map for Three.js -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+    <!-- Three.js (ESM) -->
+    <!-- Import maps aren't supported in all environments and can break parsing (Unexpected token ':'). -->
     
     <!-- PartySocket for real-time multiplayer -->
     <script src="https://unpkg.com/partysocket/dist/partysocket.js"></script>
@@ -360,7 +353,7 @@
     </div>
 
 <script type="module">
-    import * as THREE from 'three';
+    import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
     // --- REAL PARTYKIT ---
     // Real-time multiplayer using PartySocket
