@@ -270,6 +270,9 @@
             }
         }
     </script>
+    
+    <!-- PartySocket for real-time multiplayer -->
+    <script src="https://unpkg.com/partysocket/dist/partysocket.js"></script>
 </head>
 <body>
 
@@ -359,35 +362,60 @@
 <script type="module">
     import * as THREE from 'three';
 
-    // --- MOCK PARTYKIT ---
-    // Simulating a real-time server using BroadcastChannel
-    class MockPartyKit {
+    // --- REAL PARTYKIT ---
+    // Real-time multiplayer using PartySocket
+    class RealPartyKit {
         constructor() {
-            this.room = null;
-            this.id = Math.random().toString(36).substr(2, 9);
+            this.socket = null;
+            this.id = null;
             this.listeners = {};
-            this.channel = null;
+            this.roomId = null;
         }
 
         connect(roomName) {
             return new Promise((resolve) => {
-                this.room = roomName;
-                this.channel = new BroadcastChannel(`partykit_${roomName}`);
-                this.channel.onmessage = (e) => this.emit(e.data.type, e.data.payload);
+                this.roomId = roomName;
                 
-                // Announce join
-                this.broadcast('player-join', { id: this.id });
-                console.log(`[Network] Connected to ${roomName}`);
-                resolve();
+                // Connect to PartyKit server
+                // For local dev: use localhost:1999
+                // For production: use your PartyKit deployed URL
+                const host = window.location.hostname === 'localhost' 
+                    ? 'localhost:1999' 
+                    : window.location.host;
+                
+                this.socket = new PartySocket({
+                    host: host,
+                    room: roomName,
+                });
+
+                this.socket.addEventListener("open", () => {
+                    this.id = this.socket.id;
+                    console.log(`[Network] Connected to ${roomName} as ${this.id}`);
+                    
+                    // Send join message to register with server
+                    this.socket.send(JSON.stringify({ type: "join" }));
+                    resolve();
+                });
+
+                this.socket.addEventListener("message", (e) => {
+                    const msg = JSON.parse(e.data);
+                    this.emit(msg.type, msg);
+                });
+
+                this.socket.addEventListener("close", () => {
+                    console.log(`[Network] Disconnected from ${roomName}`);
+                });
+
+                this.socket.addEventListener("error", (err) => {
+                    console.error(`[Network] Error:`, err);
+                });
             });
         }
 
         broadcast(type, payload) {
-            const msg = { type, payload, sender: this.id };
-            // Send to others
-            if(this.channel) this.channel.postMessage(msg);
-            // Handle locally
-            this.emit(type, payload);
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.socket.send(JSON.stringify({ type, ...payload }));
+            }
         }
 
         on(type, callback) {
@@ -416,7 +444,7 @@
 
     // --- GAME STATE & LOGIC ---
     const GameApp = {
-        network: new MockPartyKit(),
+        network: new RealPartyKit(),
         state: 'home', // home, lobby, loading, game, gameover
         role: 'runner', // hunter, runner
         isHost: false,
@@ -441,13 +469,16 @@
             this.loop = this.loop.bind(this);
             requestAnimationFrame(this.loop);
             
-            // Handle network events
+            // Handle network events from PartyKit server
+            this.network.on('init', this.handleInit.bind(this));
             this.network.on('player-join', this.handlePlayerJoin.bind(this));
+            this.network.on('player-update', this.handlePlayerUpdate.bind(this));
             this.network.on('game-start', this.handleGameStart.bind(this));
-            this.network.on('update-state', this.handleStateUpdate.bind(this));
-            this.network.on('player-action', this.handlePlayerAction.bind(this));
+            this.network.on('update', this.handleUpdate.bind(this));
             this.network.on('hit', this.handleHit.bind(this));
-            this.network.on('minion-update', (data) => this.updateMinion(data));
+            this.network.on('minion-update', this.handleMinionUpdate.bind(this));
+            this.network.on('pickup', this.handlePickup.bind(this));
+            this.network.on('game-over', this.handleGameOver.bind(this));
         },
 
         // --- THREE.JS SETUP ---
@@ -611,15 +642,17 @@
         generateCharGrid: function() {
             const grid = document.getElementById('char-select-grid');
             grid.innerHTML = '';
-            for(let i=0; i<12; i++) {
+            for(let i=1; i<=12; i++) {
                 const div = document.createElement('div');
                 div.className = 'char-card';
-                const color = '#' + COLORS[i].toString(16).padStart(6,'0');
-                div.innerHTML = `<div class="char-avatar" style="color:${color}">●</div>`;
+                const ext = i === 12 ? 'jpg' : 'png';
+                div.innerHTML = `<img class="char-avatar" src="run_${i}.${ext}" alt="Char ${i}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;">`;
                 div.onclick = () => {
                     document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
                     div.classList.add('selected');
-                    this.selectedCharIndex = i;
+                    this.selectedCharIndex = i - 1;
+                    // Notify server of character selection
+                    this.network.broadcast('select-char', { charIndex: i - 1 });
                 };
                 grid.appendChild(div);
             }
@@ -634,13 +667,6 @@
             
             this.network.connect(code).then(() => {
                 this.switchScreen('screen-lobby');
-                this.players[this.network.id] = {
-                    id: this.network.id,
-                    charIndex: 0,
-                    role: 'runner',
-                    ready: true
-                };
-                this.updateLobbyUI();
             });
         },
 
@@ -662,7 +688,138 @@
             }
         },
 
+        // --- PartyKit Event Handlers ---
+        handleInit: function(data) {
+            // Receive full game state from server
+            console.log('Received init state:', data.state);
+            this.players = {};
+            
+            if (data.state && data.state.players) {
+                // Show lobby if game hasn't started
+                if (!data.state.started) {
+                    this.switchScreen('screen-lobby');
+                    this.updateLobbyFromPlayers(data.state.players);
+                }
+            }
+        },
+
         handlePlayerJoin: function(data) {
+            // New player joined lobby
+            console.log('Player joined:', data);
+            if (this.isHost && data.players) {
+                this.updateLobbyFromPlayers(data.players);
+            }
+        },
+
+        handlePlayerUpdate: function(data) {
+            // A player updated their info (character selection, etc.)
+            if (this.isHost && data.player) {
+                if (!this.players[data.player.id]) {
+                    this.players[data.player.id] = {};
+                }
+                this.players[data.player.id].charIndex = data.player.charIndex;
+                this.updateLobbyUI();
+            }
+        },
+
+        handleUpdate: function(data) {
+            // Position update from another player
+            if (data.id === this.network.id) return;
+            
+            const player = this.players[data.id];
+            if (player) {
+                player.mesh.position.x = data.pos.x;
+                player.mesh.position.z = data.pos.z;
+                player.mesh.rotation.y = data.rot;
+            }
+        },
+
+        handleGameStart: function(data) {
+            this.switchScreen('screen-loading');
+            document.getElementById('loading-text').innerText = "Preparing World...";
+            document.getElementById('loading-bar').style.width = "100%";
+            
+            setTimeout(() => {
+                document.getElementById('screen-loading').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                this.initGameWorldFromServer(data.state);
+            }, 1000);
+        },
+
+        handleHit: function(data) {
+            // Update HP for hit player
+            const player = this.players[data.targetId];
+            if (player) {
+                player.data.hp = data.hp;
+                
+                // Update HUD if it's me
+                if (data.targetId === this.network.id) {
+                    this.updateHPBar(data.hp);
+                }
+                
+                // Visual feedback - flash red
+                if (player.mesh) {
+                    const flashMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                    player.mesh.children[0].material = flashMat;
+                    setTimeout(() => {
+                        // Reload texture
+                        const charIndex = player.data.charIndex || 0;
+                        const textureLoader = new THREE.TextureLoader();
+                        const ext = (charIndex + 1) === 12 ? 'jpg' : 'png';
+                        const texture = textureLoader.load(`run_${charIndex + 1}.${ext}`);
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                        player.mesh.children[0].material = new THREE.MeshStandardMaterial({ map: texture });
+                    }, 100);
+                }
+            }
+        },
+
+        handleMinionUpdate: function(data) {
+            // Update minion position from server
+            if (this.minion && this.minion.mesh) {
+                this.minion.mesh.position.x = data.x;
+                this.minion.mesh.position.z = data.z;
+                this.minion.hp = data.hp;
+            } else if (data.x !== undefined) {
+                // First minion update, create mesh
+                this.createMinionMesh({ pos: { x: data.x, y: 0, z: data.z }, hp: data.hp });
+            }
+        },
+
+        handlePickup: function(data) {
+            const player = this.players[data.id];
+            if (player) {
+                player.data.weapon = data.weapon;
+                
+                // Update HUD if it's me
+                if (data.id === this.network.id) {
+                    this.updateWeaponUI(data.weapon);
+                }
+            }
+        },
+
+        handleGameOver: function(data) {
+            this.state = 'gameover';
+            this.switchScreen('screen-gameover');
+            document.getElementById('winner-text').innerText = data.winner + " WINS!";
+            document.getElementById('win-reason').innerText = data.reason;
+        },
+
+        updateLobbyFromPlayers: function(players) {
+            // Build players object from server data
+            this.players = {};
+            Object.values(players).forEach((p: any) => {
+                this.players[p.id] = {
+                    id: p.id,
+                    charIndex: p.charIndex,
+                    role: p.role,
+                    hp: p.hp
+                };
+            });
+            this.updateLobbyUI();
+        },
+
+        handlePlayerJoinOld: function(data) {
             if(this.isHost) {
                 this.players[data.id] = { id: data.id, charIndex: 0, role: 'runner' };
                 this.updateLobbyUI();
@@ -685,61 +842,66 @@
         startGame: function() {
             if(!this.isHost) return;
             
-            const ids = Object.keys(this.players);
-            const hunterId = ids[Math.floor(Math.random() * ids.length)];
+            // Tell server to start the game
+            this.network.broadcast('start-game', {});
+        },
+
+        // --- Game World Initialization from Server ---
+        initGameWorldFromServer: function(serverState) {
+            this.state = 'game';
+            this.myId = this.network.id;
             
-            const gameState = {};
-            ids.forEach(id => {
-                // Ensure spawn position doesn't collide
-                let pos = this.getSpawnPos();
-                while(this.checkCollision(new THREE.Vector3(pos.x, pos.y, pos.z), 2)) {
-                    pos = this.getSpawnPos();
-                }
+            const myData = serverState[this.myId];
+            if (myData) {
+                this.role = myData.role;
+                this.myId = this.network.id;
+            } else {
+                this.role = 'runner';
+            }
+            
+            // Setup UI
+            const roleEl = document.getElementById('hud-role');
+            roleEl.innerText = this.role.toUpperCase();
+            roleEl.className = `role-indicator role-${this.role}`;
+            
+            if(this.role === 'hunter') this.showToast("You are the HUNTER! Kill everyone.");
+            else this.showToast("You are a RUNNER! Hide or Fight!");
 
-                gameState[id] = {
-                    role: (id === hunterId) ? 'hunter' : 'runner',
-                    hp: 100,
-                    weapon: 'none',
-                    pos: pos,
-                    rot: 0,
-                    charIndex: this.players[id].charIndex
-                };
-            });
-
-            // Create Minion
-            gameState.minion = {
-                pos: { x: 0, y: 0, z: 0 },
-                hp: 500,
-                targetId: null
-            };
-
-            // Spawn Items
-            const itemSpawns = [];
-            for(let i=0; i<20; i++) {
-                const types = Object.keys(WEAPONS).filter(k => k !== 'none');
-                types.push('health');
-                itemSpawns.push({
-                    type: types[Math.floor(Math.random() * types.length)],
-                    pos: this.getSpawnPos()
+            // Create Player Meshes
+            for (const [id, p] of Object.entries(serverState)) {
+                if (id === 'minion' || id === 'items') continue;
+                this.createPlayerMesh(id, {
+                    pos: { x: p.x || 0, y: 0, z: p.z || 0 },
+                    charIndex: p.charIndex || 0,
+                    role: p.role,
+                    hp: p.hp
                 });
             }
-            gameState.items = itemSpawns;
 
-            this.network.broadcast('game-start', gameState);
+            // Create Items
+            if (serverState.items) {
+                serverState.items.forEach((item, idx) => {
+                    this.createItemMesh(idx, item);
+                });
+            }
+
+            // Create Minion
+            if(serverState.minion) {
+                this.createMinionMesh({
+                    pos: { x: serverState.minion.x, y: 0, z: serverState.minion.z },
+                    hp: serverState.minion.hp
+                });
+            }
+
+            if(this.isTouchDevice()) {
+                document.getElementById('mobile-joystick').style.display = 'block';
+                document.getElementById('mobile-fire').style.display = 'block';
+            }
+
+            this.lastTime = performance.now();
         },
 
-        handleGameStart: function(data) {
-            this.switchScreen('screen-loading');
-            document.getElementById('loading-text').innerText = "Preparing World...";
-            document.getElementById('loading-bar').style.width = "100%";
-            
-            setTimeout(() => {
-                document.getElementById('screen-loading').classList.add('hidden');
-                document.getElementById('hud').classList.remove('hidden');
-                this.initGameWorld(data);
-            }, 1000);
-        },
-
+        // Old handleGameStart kept for reference - new one is handleGameStart above
         initGameWorld: function(serverState) {
             this.state = 'game';
             
@@ -788,11 +950,18 @@
         },
 
         createPlayerMesh: function(id, data) {
-            const color = COLORS[data.charIndex || 0];
+            const charIndex = data.charIndex || 0;
             const group = new THREE.Group();
             
             const geo = new THREE.CapsuleGeometry(1, 2, 4, 8);
-            const mat = new THREE.MeshStandardMaterial({ color: color });
+            
+            // Load character texture
+            const textureLoader = new THREE.TextureLoader();
+            const ext = (charIndex + 1) === 12 ? 'jpg' : 'png';
+            const texture = textureLoader.load(`run_${charIndex + 1}.${ext}`);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            
+            const mat = new THREE.MeshStandardMaterial({ map: texture });
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.y = 2;
             mesh.castShadow = true;
@@ -852,11 +1021,16 @@
             group.add(eye1);
             group.add(eye2);
 
-            group.position.set(data.pos.x, data.pos.y, data.pos.z);
+            // Handle both old format (pos object) and new format (x, z directly)
+            const x = data.pos ? data.pos.x : data.x;
+            const z = data.pos ? data.pos.z : data.z;
+            const hp = data.hp || 500;
+            
+            group.position.set(x, 0, z);
             this.scene.add(group);
             
             // Initialize minion state on client
-            this.minion = { mesh: group, hp: data.hp, targetId: null };
+            this.minion = { mesh: group, hp: hp, targetId: null };
         },
 
         // --- INPUT HANDLING ---
@@ -937,11 +1111,8 @@
             this.updateProjectiles(delta);
             this.updateAnimations(time);
 
-            if(this.isHost) {
-                this.processHostLogic(delta);
-            } else {
-                this.sendInputs();
-            }
+            // Send movement to server
+            this.sendInputs();
 
             this.renderer.render(this.scene, this.camera);
         },
@@ -982,6 +1153,19 @@
             });
         },
 
+        // Send player position/rotation to server
+        sendInputs: function() {
+            const p = this.players[this.myId];
+            if(!p) return;
+            
+            this.network.broadcast('move', {
+                id: this.myId,
+                x: p.mesh.position.x,
+                z: p.mesh.position.z,
+                rot: p.mesh.rotation.y
+            });
+        },
+
         fireWeapon: function() {
             const now = performance.now();
             const p = this.players[this.myId];
@@ -998,11 +1182,8 @@
                 setTimeout(() => weaponMesh.rotation.x = 0, 100);
             }
 
-            if(this.isHost) {
-                this.createProjectile(this.network.id, weapon);
-            } else {
-                this.network.broadcast('player-action', { type: 'shoot', weapon: weaponKey });
-            }
+            // Create projectile locally (client-side prediction)
+            this.createProjectile(this.network.id, weapon);
         },
 
         createProjectile: function(ownerId, weapon) {
@@ -1044,7 +1225,12 @@
                     if(p.data.hp <= 0) continue;
                     const dist = proj.mesh.position.distanceTo(p.mesh.position);
                     if(dist < 2) {
-                        this.handleDamage(id, proj.damage, proj.owner);
+                        // Send hit to server (server handles damage calculation)
+                        this.network.broadcast('hit', { 
+                            targetId: id, 
+                            damage: proj.damage,
+                            sourceId: proj.owner
+                        });
                         this.scene.remove(proj.mesh);
                         this.projectiles.splice(i, 1);
                         return;
@@ -1055,15 +1241,10 @@
                 if(this.minion && this.minion.hp > 0) {
                     const dist = proj.mesh.position.distanceTo(this.minion.mesh.position);
                     if(dist < 3) {
-                        this.minion.hp -= proj.damage;
+                        // Send minion hit to server
+                        this.network.broadcast('minion-hit', { damage: proj.damage });
                         this.scene.remove(proj.mesh);
                         this.projectiles.splice(i, 1);
-                        this.showToast(`Minion HP: ${this.minion.hp}`);
-                        if(this.minion.hp <= 0) {
-                            this.scene.remove(this.minion.mesh);
-                            this.minion = null;
-                            this.checkWinCondition();
-                        }
                         return;
                     }
                 }
@@ -1225,6 +1406,17 @@
             document.getElementById('hud-hp-text').innerText = Math.ceil(p.data.hp) + '/100';
             document.getElementById('hud-weapon-name').innerText = WEAPONS[p.data.weapon].name;
             const weapon = WEAPONS[p.data.weapon];
+            document.getElementById('hud-ammo').innerText = weapon.type === 'range' ? '∞' : 'Melee';
+        },
+
+        updateHPBar: function(hp) {
+            document.getElementById('hud-hp-bar').style.width = hp + '%';
+            document.getElementById('hud-hp-text').innerText = Math.ceil(hp) + '/100';
+        },
+
+        updateWeaponUI: function(weaponKey) {
+            const weapon = WEAPONS[weaponKey];
+            document.getElementById('hud-weapon-name').innerText = weapon.name;
             document.getElementById('hud-ammo').innerText = weapon.type === 'range' ? '∞' : 'Melee';
         },
 
