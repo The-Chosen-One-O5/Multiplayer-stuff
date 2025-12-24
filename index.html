@@ -265,7 +265,6 @@
     <!-- Import maps aren't supported in all environments and can break parsing (Unexpected token ':'). -->
     
     <!-- PartySocket for real-time multiplayer -->
-    <script src="https://unpkg.com/partysocket/dist/partysocket.js"></script>
 </head>
 <body>
 
@@ -354,6 +353,7 @@
 
 <script type="module">
     import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+    import { PartySocket } from 'https://unpkg.com/partysocket@1.1.10/dist/index.js';
 
     // --- REAL PARTYKIT ---
     // Real-time multiplayer using PartySocket
